@@ -728,12 +728,10 @@ end
 # In QunatumOptics.jl, this method will return true whenever the shapes of b1 and b2 match,
 # but we'd like to distinguish, i.e., between Ion ⊗ mode1 ⊗ mode2 and Ion ⊗ mode2 ⊗ mode1
 # when mode1.N == mode2.N but mode1.axis ≠ mode2.axis.
-function (
-    QuantumOptics.:(==)(
-        b1::T,
-        b2::T
-    ) where {T <: CompositeBasis{<:Vector{Int}, <:Tuple{Vararg{<:IonSimBasis}}}}
-)
+function (QuantumOptics.:(==)(
+    b1::T,
+    b2::T
+) where {T <: CompositeBasis{<:Vector{Int}, <:Tuple{Vararg{<:IonSimBasis}}}})
     N = length(b1.bases)
     if N ≠ length(b2.bases)
         return false

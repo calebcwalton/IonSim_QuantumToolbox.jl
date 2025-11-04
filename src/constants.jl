@@ -102,11 +102,11 @@ end
 ndot(a::NamedTuple{(:x, :y, :z)}, b::NamedTuple{(:x, :y, :z)}) =
     a.x * b.x + a.y * b.y + a.z * b.z
 function Base.:+(a::NamedTuple{(:x, :y, :z)}, b::NamedTuple{(:x, :y, :z)})
-    return (x=a.x + b.x, y=a.y + b.y, z=a.z + b.z)
+    return (x=(a.x + b.x), y=(a.y + b.y), z=(a.z + b.z))
 end
 function Base.:-(a::NamedTuple{(:x, :y, :z)}, b::NamedTuple{(:x, :y, :z)})
-    return (x=a.x - b.x, y=a.y - b.y, z=a.z - b.z)
+    return (x=(a.x - b.x), y=(a.y - b.y), z=(a.z - b.z))
 end
-Base.:/(a::NamedTuple{(:x, :y, :z)}, b::Number) = (x=a.x / b, y=a.y / b, z=a.z / b)
-Base.:*(a::NamedTuple{(:x, :y, :z)}, b::Number) = (x=a.x * b, y=a.y * b, z=a.z * b)
-Base.:*(b::Number, a::NamedTuple{(:x, :y, :z)}) = (x=a.x * b, y=a.y * b, z=a.z * b)
+Base.:/(a::NamedTuple{(:x, :y, :z)}, b::Number) = (x=(a.x / b), y=(a.y / b), z=(a.z / b))
+Base.:*(a::NamedTuple{(:x, :y, :z)}, b::Number) = (x=(a.x * b), y=(a.y * b), z=(a.z * b))
+Base.:*(b::Number, a::NamedTuple{(:x, :y, :z)}) = (x=(a.x * b), y=(a.y * b), z=(a.z * b))
