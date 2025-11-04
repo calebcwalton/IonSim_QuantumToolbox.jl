@@ -20,7 +20,7 @@ YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 [compat]
 FunctionWrappers = "1.1.2"
 NLsolve = "4.5.1"
-Optim = "1.9.3"
+Optim = "1.9.3 - 1.11"
 OrderedCollections = "1.4.1"
 Plots = "1.40.3"
 PolynomialRoots = "1.0.0"
