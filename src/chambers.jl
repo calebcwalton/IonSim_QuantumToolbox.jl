@@ -1,4 +1,3 @@
-using QuantumOptics: tensor, CompositeBasis
 using .PhysicalConstants: ħ, c
 
 export Chamber,
@@ -57,7 +56,7 @@ interacting with laser light.
         modeling cross-talk).
 **derived fields**
 * `_cnst_δB::Bool`: A Boolean flag signifying whether or not `δB` is a constant function.
-* `basis<:CompositeBasis`: The basis for describing the combined system, ions + vibrational
+* `basis<:IonSimCompositeBasis`: The basis for describing the combined system, ions + vibrational
         modes. If constructing the Hamiltonian explictly (with [`hamiltonian`](@ref)), then
         the ordering of the basis is set, by convention, as
         ``ion₁ ⊗ ion₂ ⊗ ... ⊗ ion_N ⊗ mode₁ ⊗ mode₂ ⊗ ... ⊗ mode_N``, where the ion bases are
@@ -249,12 +248,13 @@ Returns the composite basis describing the Hilbert space for `chamber`.
 This is the same as basis(iontrap(chain)).
 """
 function basis(T::Chamber)
-    return tensor(
+    components = IonSimBasis[
         T.iontrap.ions...,
         T.iontrap.selectedmodes.x...,
         T.iontrap.selectedmodes.y...,
         T.iontrap.selectedmodes.z...,
-    )
+    ]
+    return IonSimCompositeBasis(components, [hilbert_dim(c) for c in components])
 end
 
 
@@ -309,7 +309,7 @@ If obj is a Vector of `VibrationalMode`, returns a tensor product `mode1[0] ⊗ 
 If obj is a `LinearChain`, returns the full ground state of the motional degrees of freedom as a tensor product.
 """
 groundstate(mode::VibrationalMode) = mode[0]
-groundstate(modes::Vector{VibrationalMode}) = tensor([mode[0] for mode in modes]...)
+groundstate(modes::Vector{VibrationalMode}) = _ionsim_tensor([mode[0] for mode in modes])
 groundstate(lc::LinearChain) = groundstate(modes(lc))
 
 
@@ -728,16 +728,13 @@ end
 # In QunatumOptics.jl, this method will return true whenever the shapes of b1 and b2 match,
 # but we'd like to distinguish, i.e., between Ion ⊗ mode1 ⊗ mode2 and Ion ⊗ mode2 ⊗ mode1
 # when mode1.N == mode2.N but mode1.axis ≠ mode2.axis.
-function (QuantumOptics.:(==)(
-    b1::T,
-    b2::T
-) where {T <: CompositeBasis{<:Vector{Int}, <:Tuple{Vararg{<:IonSimBasis}}}})
-    N = length(b1.bases)
-    if N ≠ length(b2.bases)
+function Base.:(==)(b1::IonSimCompositeBasis, b2::IonSimCompositeBasis)
+    N = length(b1.components)
+    if N ≠ length(b2.components)
         return false
     end
     for i in 1:N
-        if !(b1.bases[i] == b2.bases[i])
+        if !(b1.components[i] == b2.components[i])
             return false
         end
     end

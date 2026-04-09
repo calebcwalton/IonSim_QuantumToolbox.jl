@@ -1,7 +1,6 @@
 using SparseArrays: rowvals, nzrange, spzeros, spdiagm, findnz, rowvals, nonzeros
 using FunctionWrappers: FunctionWrapper
 using PolynomialRoots: roots
-using QuantumOptics: SparseOperator, embed
 
 export hamiltonian
 
@@ -11,7 +10,7 @@ export hamiltonian
             rwa_cutoff::Real=Inf, displacement="truncated", time_dependent_eta=false
         )
 Constructs the Hamiltonian for `chamber` as a function of time. Return type is a function
-`h(t::Real, ψ)` that, itself, returns a `QuantumOptics.SparseOperator`.
+`h(t::Real, ψ)` that, itself, returns a `QuantumObject`.
 
 **args**
 * `timescale`: e.g. a value of 1e-6 will take time to be in μs
@@ -92,8 +91,8 @@ function hamiltonian(
         time_dependent_eta
     )
     aui, gbi, gbs, bfunc, δνi, δνfuncs = _setup_fluctuation_hamiltonian(chamber, timescale)
-    S = SparseOperator(basis(chamber))
-    function f(t, ψ)  # a two argument function is required in the QuantumOptics solvers
+    S = _zero_op(basis(chamber))
+    function f(t, ψ)  # a two argument function is required by the time evolution solvers
         @inbounds begin
             @simd for i in 1:length(indxs)
                 bt_i, conj_bt_i = b[i](t)::Tuple{ComplexF64, ComplexF64}
@@ -425,7 +424,7 @@ function _setup_δν_hamiltonian(chamber, timescale)
         )
         δν_indices_l = Vector{Vector{Int64}}(undef, 0)
         mode_op = number(mode)
-        A = embed(basis(chamber), [N + l], [mode_op]).data
+        A = _embed(basis(chamber), [N + l], [mode_op]).data
         mode_dim = mode.shape[1]
         for i in 1:(mode_dim-1)
             indices = [x[1] for x in getfield.(findall(x -> x .== complex(i, 0), A), :I)]
@@ -457,7 +456,7 @@ function _setup_global_B_hamiltonian(chamber, timescale)
     for n in eachindex(all_ions)
         for sublevel in sublevels(all_ions[n])
             ion_op = sigma(all_ions[n], sublevel)
-            A = embed(basis(chamber), [n], [ion_op]).data
+            A = _embed(basis(chamber), [n], [ion_op]).data
             indices = [x[1] for x in getfield.(findall(x -> x .== complex(1, 0), A), :I)]
             push!(global_B_indices, indices)
             # zeemanshift(ions[n], sublevel, 1]) is the Zeeman shift of

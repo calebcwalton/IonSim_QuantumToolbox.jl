@@ -1,5 +1,3 @@
-using QuantumOptics: basisstate
-
 export VibrationalMode,
     frequency,
     modestructure,
@@ -154,5 +152,5 @@ Base.show(io::IO, V::VibrationalMode) = print(
 
 function Base.getindex(V::VibrationalMode, n::Int)
     @assert 0 <= n <= modecutoff(V) "n ∉ [0, $(V.N+1)]"
-    return basisstate(V, n + 1)
+    return fock(hilbert_dim(V), n)
 end

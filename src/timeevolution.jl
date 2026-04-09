@@ -1,77 +1,68 @@
-import QuantumOptics.timeevolution
-import QuantumOptics.stochastic
-using QuantumOptics: Basis, Operator, CompositeBasis, Ket, StateVector
+module timeevolution
 
-#############################################################################################
-# Wrap QuantumOptics solvers in order to implement our form of basis check
-#############################################################################################
+using QuantumToolbox: QuantumObject, Ket, Operator
+using OrdinaryDiffEqVerner: Vern7
+using SciMLBase: ODEProblem, solve
 
-# function timeevolution.master_dynamic(tspan, rho0::T, f::Function;
-#             rates=nothing, fout::Union{Function,Nothing}=nothing, kwargs...
-#         ) where {B<:Basis,T<:Operator{B,B}}
-#     check_bases(f(0., 0.).basis_l, rho0.basis_l)
-#     timeevolution.master_dynamic(tspan, rho0, f; rates=rates, fout=fout, kwargs...)
-# end
+"""
+    schroedinger_dynamic(tspan, psi0, f; kwargs...)
+Integrates the Schrodinger equation where the Hamiltonian `f(t, psi)` is a function of time.
+Returns `(tout, states)` where `states` is a vector of QuantumObject{Ket}.
 
-# function timeevolution.mcwf_dynamic(tspan, psi0::T, f::Function;
-#     seed=rand(UInt), rates=nothing,
-#     fout=nothing, display_beforeevent=false, display_afterevent=false,
-#     kwargs...) where {T<:Ket}
-#     check_bases(f(0., 0.).basis_l, psi0.basis)
-#     timeevolution.mcwf_dynamic(tspan, psi0, f; seed=seed, rates=rates, fout=fout, 
-#             display_beforeevent=display_beforeevent, display_afterevent=display_afterevent,
-#             kwargs...
-#         )
-# end
-
-# function stochastic.schroedinger_dynamic(tspan, psi0::T, fdeterm::Function, fstoch::Function;
-#             fout::Union{Function,Nothing}=nothing, noise_processes::Int=0,
-#             normalize_state::Bool=false, kwargs...
-#         ) where T<:Ket
-#     check_bases(fdeterm(0.0, 0.0), fstoch)
-#     stochastic.schroedinger_dynamic(tspan, psi0, fdeterm, fstoch;
-#             fout=fout, noise_processes=noise_processes, normalize_state=normalize_state, 
-#             kwargs...
-#         )
-# end
-
-# function stochastic.master_dynamic(tspan, rho0::T, fdeterm::Function, fstoch::Function;
-#             rates=nothing, fout::Union{Function,Nothing}=nothing,
-#             noise_processes::Int=0, kwargs...
-#         ) where {B<:Basis,T<:Operator{B,B}}
-#         check_bases()
-#         stochastic.master_dynamic(tspan, rho0, fdeterm, fstoch; rates=rates, fout=fout,
-#                 noise_processes=noise_processes, kwargs...
-#             )
-# end
-
-# function timeevolution.schroedinger_dynamic(tspan, psi0::T, f::Function;
-#             fout::Union{Function,Nothing}=nothing, kwargs...
-#         ) where T<:StateVector
-#     check_bases(f(0., 0.).basis_l, psi0.basis)
-#     timeevolution.schroedinger_dynamic(tspan, psi0, f; fout=fout, kwargs...)
-# end
-
-# when solving for unitary evolution, it is convenient to switch back and forth between an 
-# initial state that is pure and one that is mixed
-function timeevolution.schroedinger_dynamic(
+This provides backward compatibility with the QuantumOptics.jl API.
+"""
+function schroedinger_dynamic(
     tspan,
-    rho0::T,
+    psi0::QuantumObject{Ket},
     f::Function;
     fout::Union{Function, Nothing}=nothing,
     kwargs...
-) where {B <: Basis, T <: Operator{B, B}}
-    check_bases(f(0.0, 0.0).basis_l, rho0.basis_l)
-    Jvec = []
-    return timeevolution.master_dynamic(
-        tspan,
-        rho0,
-        (t, rho) -> (f(t, rho), Jvec, Jvec);
-        fout=fout,
-        kwargs...
-    )
+)
+    u0 = copy(psi0.data)
+    tlist = collect(Float64, tspan)
+
+    function ode_func!(du, u, p, t)
+        H = f(t, nothing)
+        du .= -1im .* (H.data * u)
+    end
+
+    prob = ODEProblem(ode_func!, u0, (tlist[1], tlist[end]))
+    sol = solve(prob, Vern7(); saveat=tlist, abstol=1e-8, reltol=1e-6, kwargs...)
+
+    states = Vector{typeof(psi0)}(undef, length(sol.t))
+    for i in eachindex(sol.t)
+        ψ = deepcopy(psi0)
+        ψ.data .= sol[i]
+        states[i] = ψ
+    end
+    return sol.t, states
 end
 
-check_bases(b1::CompositeBasis, b2::CompositeBasis) = b1 == b2 || throw(IncompatibleBases())
+function schroedinger_dynamic(
+    tspan,
+    rho0::QuantumObject{Operator},
+    f::Function;
+    fout::Union{Function, Nothing}=nothing,
+    kwargs...
+)
+    u0 = copy(rho0.data)
+    tlist = collect(Float64, tspan)
 
-mutable struct IncompatibleBases <: Exception end
+    function ode_func!(du, u, p, t)
+        H = f(t, nothing)
+        du .= -1im .* (H.data * u .- u * H.data)
+    end
+
+    prob = ODEProblem(ode_func!, u0, (tlist[1], tlist[end]))
+    sol = solve(prob, Vern7(); saveat=tlist, abstol=1e-8, reltol=1e-6, kwargs...)
+
+    states = Vector{typeof(rho0)}(undef, length(sol.t))
+    for i in eachindex(sol.t)
+        ρ = deepcopy(rho0)
+        ρ.data .= sol[i]
+        states[i] = ρ
+    end
+    return sol.t, states
+end
+
+end  # module timeevolution

@@ -477,7 +477,7 @@ function searchfor_trappingpotential_parameters(
             upperbounds,
             initial,
             Fminbox(NelderMead()),
-            Optim.Options(g_abstol=1e-12, g_reltol=1e-6),
+            Optim.Options(g_abstol=1e-12),
         )
         xfreqs = [i[1] for i in diagonalize_Kij(M, Q, x̂, kz, res.minimizer...)]
         yfreqs = [i[1] for i in diagonalize_Kij(M, Q, ŷ, kz, res.minimizer...)]
@@ -492,7 +492,7 @@ function searchfor_trappingpotential_parameters(
             upperbounds[1:1],
             initial[1:1],
             Fminbox(NelderMead()),
-            Optim.Options(g_abstol=1e-6, g_reltol=1e-6),
+            Optim.Options(g_abstol=1e-6),
         )
         xfreqs = [i[1] for i in diagonalize_Kij(M, Q, x̂, kz, res.minimizer[1], 0)]
         yfreqs = xfreqs
@@ -638,8 +638,8 @@ function modecutoff!(lc::LinearChain, N::Int)
     end
 end
 
-"""	
-    basis(chain::LinearChain)::CompositeBasis
+"""
+    basis(chain::LinearChain)::IonSimCompositeBasis
 Returns the composite basis describing the Hilbert space for `chain`.
 
 Order is ``ion₁ ⊗ ion₂ ⊗ ... ⊗ ion_N ⊗ mode₁ ⊗ mode₂ ⊗ ... ⊗ mode_N``, where the ion
@@ -647,7 +647,8 @@ bases are ordered according to the order in `ions(chain)` and the vibrational mo
 ordered according to the order in `[xmodes(chain), ymodes(chain), zmodes(chain)]`.
 """
 function basis(chain::LinearChain)
-    return tensor(ions(chain)..., xmodes(chain)..., ymodes(chain)..., zmodes(chain))
+    components = IonSimBasis[ions(chain)..., xmodes(chain)..., ymodes(chain)..., zmodes(chain)...]
+    return IonSimCompositeBasis(components, [hilbert_dim(c) for c in components])
 end
 
 function Base.print(lc::LinearChain)

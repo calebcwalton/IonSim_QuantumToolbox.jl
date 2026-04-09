@@ -1,4 +1,4 @@
-using QuantumOptics: DenseOperator
+using QuantumToolbox: QuantumObject
 using LinearAlgebra: diagm, norm
 using Test, IonSim
 using Suppressor
@@ -526,10 +526,10 @@ end
         @test H1(tp, 0).data ≈ H(tp, 0).data
 
         # Case 3: test Hamiltonian with zero Lamb-Dicke value, i.e. no vibrational modes
-        mode_opa1 = DenseOperator(mode1, diagm(0 => [1 - ηa1^2 * i for i in 0:(mode1.N)]))
-        mode_opa2 = DenseOperator(mode2, diagm(0 => [1 - ηa2^2 * i for i in 0:(mode2.N)]))
-        mode_opb1 = DenseOperator(mode1, diagm(0 => [1 - ηb1^2 * i for i in 0:(mode1.N)]))
-        mode_opb2 = DenseOperator(mode2, diagm(0 => [1 - ηb2^2 * i for i in 0:(mode2.N)]))
+        mode_opa1 = QuantumObject(ComplexF64.(diagm(0 => [1 - ηa1^2 * i for i in 0:(mode1.N)])))
+        mode_opa2 = QuantumObject(ComplexF64.(diagm(0 => [1 - ηa2^2 * i for i in 0:(mode2.N)])))
+        mode_opb1 = QuantumObject(ComplexF64.(diagm(0 => [1 - ηb1^2 * i for i in 0:(mode1.N)])))
+        mode_opb2 = QuantumObject(ComplexF64.(diagm(0 => [1 - ηb2^2 * i for i in 0:(mode2.N)])))
         mode_op_a = mode_opa1 ⊗ mode_opa2
         mode_op_b = mode_opb1 ⊗ mode_opb2
         Hp(t) = ion_op(t) ⊗ one(C_b) ⊗ mode_op_a + one(C_a) ⊗ ion_op(t) ⊗ mode_op_b

@@ -1,6 +1,4 @@
-using QuantumOptics: projector, tensor, SparseOperator, DenseOperator, basisstate, Ket
 using LinearAlgebra: diagm
-import QuantumOptics: displace, thermalstate, coherentthermalstate, fockstate
 
 export create,
     destroy,
@@ -14,6 +12,10 @@ export create,
     ionprojector,
     ionstate
 
+# Backward compat: one(basis) → identity operator
+Base.one(v::VibrationalMode) = qeye(hilbert_dim(v))
+Base.one(ion::Ion) = qeye(hilbert_dim(ion))
+
 #############################################################################################
 # VibrationalMode operators
 #############################################################################################
@@ -22,7 +24,7 @@ export create,
     create(v::VibrationalMode)
 returns the creation operator for `v` such that: `create(v) * v[i] = √(i+1) * v[i+1]`.
 """
-create(v::VibrationalMode) = SparseOperator(v, diagm(-1 => sqrt.(1:(modecutoff(v)))))
+create(v::VibrationalMode) = QuantumObject(sparse(diagm(-1 => complex.(sqrt.(1:(modecutoff(v)))))))
 
 """
     destroy(v::VibrationalMode)
@@ -34,7 +36,7 @@ destroy(v::VibrationalMode) = create(v)'
     number(v::VibrationalMode)
 Returns the number operator for `v` such that:  `number(v) * v[i] = i * v[i]`.
 """
-number(v::VibrationalMode) = SparseOperator(v, diagm(0 => 0:(modecutoff(v))))
+number(v::VibrationalMode) = QuantumObject(sparse(diagm(0 => complex.(Float64.(0:(modecutoff(v)))))))
 
 """
     displace(v::VibrationalMode, α::Number; method="truncated")
@@ -53,7 +55,7 @@ function displace(v::VibrationalMode, α::Number; method="truncated")
     @assert method in ["truncated", "analytic"] "method ∉ [truncated, analytic]"
     D = zeros(ComplexF64, modecutoff(v) + 1, modecutoff(v) + 1)
     if α == 0
-        return one(v)
+        return qeye(hilbert_dim(v))
     elseif method ≡ "analytic"
         @inbounds begin
             @simd for n in 1:(modecutoff(v)+1)
@@ -62,9 +64,9 @@ function displace(v::VibrationalMode, α::Number; method="truncated")
                 end
             end
         end
-        return DenseOperator(v, D)
+        return QuantumObject(D)
     elseif method ≡ "truncated"
-        return exp(dense(α * create(v) - conj(α) * destroy(v)))
+        return exp(α * create(v) - conj(α) * destroy(v))
     end
 end
 
@@ -83,14 +85,13 @@ function thermalstate(v::VibrationalMode, n̄::Real; method="truncated")
     @assert modecutoff(v) ≥ n̄ "`n̄` must be less than `modecutoff(v)`"
     @assert method in ["truncated", "analytic"] "method ∉ [truncated, analytic]"
     if n̄ == 0
-        return v[0] ⊗ v[0]'
+        return v[0] * dag(v[0])
     elseif method ≡ "truncated"
         d = [(n̄ / (n̄ + 1))^i for i in 0:(modecutoff(v))]
-        return DenseOperator(v, diagm(0 => d) ./ sum(d))
+        return QuantumObject(diagm(0 => complex.(d ./ sum(d))))
     elseif method ≡ "analytic"
-        return DenseOperator(
-            v,
-            diagm(0 => [(n̄ / (n̄ + 1))^i / (n̄ + 1) for i in 0:(modecutoff(v))])
+        return QuantumObject(
+            diagm(0 => complex.([(n̄ / (n̄ + 1))^i / (n̄ + 1) for i in 0:(modecutoff(v))]))
         )
     end
 end
@@ -108,7 +109,7 @@ function coherentstate(v::VibrationalMode, α::Number)
     @inbounds for n in 1:(modecutoff(v))
         k[n+1] = k[n] * α / √n
     end
-    return Ket(v, k)
+    return QuantumObject(k)
 end
 
 """
@@ -151,10 +152,10 @@ sublevel <: Int: Returns the `sublevel`th eigenstate
 function ionstate(ion::Ion, sublevel::Tuple{String, Real})
     validatesublevel(ion, sublevel)
     i = findall(sublevels(ion) .== [sublevel])[1]
-    return basisstate(ion, i)
+    return fock(hilbert_dim(ion), i - 1)
 end
 ionstate(ion::Ion, sublevelalias::String) = ionstate(ion, sublevel(ion, sublevelalias))
-ionstate(ion::Ion, sublevel::Int) = basisstate(ion, sublevel)
+ionstate(ion::Ion, sublevel::Int) = fock(hilbert_dim(ion), sublevel - 1)
 
 """
     ionstate(object::Union{IonTrap, Chamber}, sublevels)
@@ -168,7 +169,7 @@ function ionstate(iontrap::IonTrap, states::Vector)
     allions = ions(iontrap)
     L = length(allions)
     @assert L ≡ length(states) "wrong number of states"
-    return tensor([ionstate(allions[i], states[i]) for i in 1:L])
+    return _ionsim_tensor([ionstate(allions[i], states[i]) for i in 1:L])
 end
 ionstate(chamber::Chamber, states::Vector) = ionstate(iontrap(chamber), states)
 
@@ -180,7 +181,7 @@ returned by `ion[ψᵢ]`.
 If ψ2 is not given, then ``|ψ1\\rangle\\langle ψ1|`` is returned.
 """
 sigma(ion::Ion, ψ1::T, ψ2::T) where {T <: Union{Tuple{String, Real}, String, Int}} =
-    sparse(projector(ion[ψ1], dagger(ion[ψ2])))
+    sparse(ion[ψ1] * dag(ion[ψ2]))
 sigma(ion::Ion, ψ1::Union{Tuple{String, Real}, String, Int}) = sigma(ion, ψ1, ψ1)
 
 """
@@ -203,13 +204,13 @@ function ionprojector(
     L = length(allions)
     @assert L ≡ length(sublevels) "wrong number of sublevels"
     allmodes = modes(IC)
-    observable = tensor([projector(allions[i][sublevels[i]]) for i in 1:L]...)
-    if !only_ions
-        for mode in allmodes
-            observable = observable ⊗ one(mode)
-        end
+    ion_projs = [allions[i][sublevels[i]] * dag(allions[i][sublevels[i]]) for i in 1:L]
+    mode_eyes = [qeye(hilbert_dim(mode)) for mode in allmodes]
+    if only_ions
+        return _ionsim_tensor(ion_projs)
+    else
+        return _ionsim_tensor(vcat(ion_projs, mode_eyes))
     end
-    return observable
 end
 function ionprojector(
     T::Chamber,

@@ -1,4 +1,3 @@
-using QuantumOptics: NLevelBasis, nlevelstate
 using Test, IonSim
 using IonSim.PhysicalConstants
 using Suppressor

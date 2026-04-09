@@ -1,4 +1,3 @@
-using QuantumOptics: NLevelBasis, CompositeBasis, FockBasis
 using Test, IonSim
 using IonSim.PhysicalConstants: ħ, c
 using Suppressor
@@ -20,9 +19,9 @@ using Suppressor
         T = Chamber(iontrap=chain, lasers=[L1, L1])
 
         # test construction of CompositeBasis
-        @test basis(T).bases[1] ≡ T.iontrap.ions[1]
-        @test basis(T).bases[2] ≡ T.iontrap.ions[2]
-        @test basis(T).bases[3] ≡ T.iontrap.selectedmodes.z[1]
+        @test basis(T).components[1] ≡ T.iontrap.ions[1]
+        @test basis(T).components[2] ≡ T.iontrap.ions[2]
+        @test basis(T).components[3] ≡ T.iontrap.selectedmodes.z[1]
 
         # test construction of T.δB
         t = 0:1:100
@@ -57,10 +56,10 @@ using Suppressor
             comfrequencies=(x=3e6, y=3e6, z=1e6),
             selectedmodes=(; z=[1])
         )
-        @test length(basis(T).bases) ≡ 3
+        @test length(basis(T).components) ≡ 3
         iontrap!(T, chain1)
         @test T.iontrap ≡ chain1
-        @test length(basis(T).bases) ≡ 4
+        @test length(basis(T).components) ≡ 4
 
         # make sure print/show doesn't throw errors
         print(T)

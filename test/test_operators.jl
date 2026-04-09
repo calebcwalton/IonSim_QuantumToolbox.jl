@@ -1,5 +1,4 @@
-import QuantumOptics
-const qo = QuantumOptics
+import QuantumOptics as qo
 using Test, IonSim
 using Suppressor
 
@@ -96,7 +95,7 @@ using Suppressor
             ComplexF64[1; 0] * ComplexF64[1; 0]'
         )
         @test ionprojector(chain, ("S1/2", -1 // 2), ("D5/2", -1 // 2)) ==
-              ψ ⊗ one(allmodes[1]) ⊗ one(allmodes[2])
+              iontensor(ψ, one(allmodes[1]), one(allmodes[2]))
         @test ψ == ionprojector(T, ("S1/2", -1 // 2), ("D5/2", -1 // 2), only_ions=true)
     end
 
