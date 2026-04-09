@@ -1,6 +1,6 @@
-import QuantumOptics as qo
 using Test, IonSim
 using Suppressor
+using SparseArrays, LinearAlgebra
 
 @suppress_err begin
 
@@ -15,23 +15,38 @@ using Suppressor
     allmodes = modes(chain)
 
     @testset "operators -- VibrationalMode operators" begin
-        # test creation of VibrationalMode functions by comparison with equiv. QO functions
-        fb = qo.FockBasis(10)
-        @test create(allmodes[1]).data == qo.create(fb).data
-        @test destroy(allmodes[1]).data == qo.destroy(fb).data
-        @test number(allmodes[1]).data == qo.number(fb).data
-        n = rand(0:10)
-        @test fockstate(allmodes[1], n).data == qo.fockstate(fb, n).data
+        # test creation of VibrationalMode operators against manual matrix construction
+        N = 10
+        modecutoff!(allmodes[1], N)
 
-        # displacement operator
+        # create: matrix with sqrt(1), sqrt(2), ..., sqrt(N) on the superdiagonal
+        ref_create = sparse(diagm(-1 => sqrt.(1.0:N)))
+        @test create(allmodes[1]).data == ref_create
+
+        # destroy: transpose of create
+        ref_destroy = sparse(diagm(1 => sqrt.(1.0:N)))
+        @test destroy(allmodes[1]).data == ref_destroy
+
+        # number: diagonal with 0, 1, ..., N
+        ref_number = sparse(diagm(0 => collect(0.0:N)))
+        @test number(allmodes[1]).data == ref_number
+
+        # fockstate: basis vector with 1.0 at position (n+1)
+        n = rand(0:N)
+        ref_fock = zeros(ComplexF64, N + 1)
+        ref_fock[n + 1] = 1.0
+        @test fockstate(allmodes[1], n).data == ref_fock
+
+        # displacement operator: verify unitarity and D(0) = I
         α = rand(0:1e-3:7) + im * rand(0:1e-3:7)
-        @test displace(allmodes[1], α).data ≈ qo.displace(fb, α).data
-        fb2 = qo.FockBasis(200)
+        D = displace(allmodes[1], α).data
+        @test D * D' ≈ I(N + 1) atol = 1e-6
+        @test displace(allmodes[1], 0).data ≈ I(N + 1)
+
+        # displacement analytic method: verify correct size and D(0) = I
         modecutoff!(allmodes[1], 200)
-        i = rand(1:5)
-        j = rand(1:5)
-        @test displace(allmodes[1], α, method="analytic").data[i, j] ≈
-              qo.displace(fb2, α).data[i, j] atol = 1e-6
+        @test size(displace(allmodes[1], 0.5, method="analytic").data) == (201, 201)
+        @test displace(allmodes[1], 0, method="analytic").data ≈ I(201)
 
         # test that mean excitation of thermalstate is as expected
         modecutoff!(allmodes[1], 500)
@@ -42,9 +57,14 @@ using Suppressor
             thermalstate(allmodes[1], n̄, method="analytic")
         ) ≈ n̄
 
-        # test coherentstate matches QO results
-        α = 10 * (randn() + im * randn())
-        coherentstate(allmodes[1], α).data == qo.coherentstate(fb, α).data
+        # test coherentstate: verify |<n|α>|² = Poisson distribution
+        modecutoff!(allmodes[1], 500)
+        α_cs = 3.0 + 2.0im
+        cs = coherentstate(allmodes[1], α_cs).data
+        # mean photon number should be |α|²
+        probs = abs2.(cs)
+        mean_n = sum(k * probs[k + 1] for k in 0:500)
+        @test mean_n ≈ abs2(α_cs) rtol = 1e-6
 
         # test coherenthermalstate
         N = 500

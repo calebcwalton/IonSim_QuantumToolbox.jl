@@ -193,18 +193,18 @@ function _setup_base_hamiltonian(
     Q = prod([shape(ion)[1] for ion in all_ions])
     ion_arrays = [spdiagm(0 => [true for _ in 1:shape(ion)[1]]) for ion in all_ions]
 
-    ηm, Δm, Ωm =
-        _ηmatrix(chamber), _Δmatrix(chamber, timescale), _Ωmatrix(chamber, timescale)
+    ηm, Δm = _ηmatrix(chamber), _Δmatrix(chamber, timescale)
+    Ωm, Ω_zero_m = _Ωmatrix(chamber, timescale)
     lamb_dicke_order = _check_lamb_dicke_order(lamb_dicke_order, L)
     ld_array, rows, vals = _ld_array(mode_dims, lamb_dicke_order, νlist, timescale)
     if displacement == "truncated" && time_dependent_eta
         rootlist = map(x -> real.(roots(_He(x))), mode_dims)
     end
 
-    indxs_dict = Dict()
+    indxs_dict = Dict{Tuple{Int64, Int64}, Int64}()
     repeated_indices = Vector{Vector{Tuple{Int64, Int64}}}(undef, 0)
     conj_repeated_indices = Vector{Vector{Tuple{Int64, Int64}}}(undef, 0)
-    functions = FunctionWrapper[]
+    functions = FunctionWrapper{Tuple{ComplexF64, ComplexF64}, Tuple{Float64}}[]
     work_eta = zeros(Float64, L)
     local ts, ion_rows, ion_cols, ion_idxs, ion_reps, rn
 
@@ -229,12 +229,12 @@ function _setup_base_hamiltonian(
         function ηlist(t)
             for i in 1:L
                 η = ηnm[i]
-                typeof(η) <: Number ? work_eta[i] = ηnm[i] : work_eta[i] = ηnm[i](t)
+                work_eta[i] = ηnm[i](t)
             end
             return work_eta
         end
         if displacement == "truncated" && !time_dependent_eta
-            D_arrays = []
+            D_arrays = Matrix{Float64}[]
             for (i, mode) in enumerate(allmodes)
                 push!(D_arrays, real.(displace(mode, ηlist(0)[i]).data))
             end
@@ -244,7 +244,7 @@ function _setup_base_hamiltonian(
         for (ti, tr) in enumerate(ts)
             Δ, Ω = Δm[rn, m][ti], Ωm[rn, m][ti]
             Δ_2π = Δ / 2π
-            typeof(Ω) <: Number && continue  # e.g. the laser doesn't shine on this ion
+            Ω_zero_m[rn, m][ti] && continue  # structurally zero (laser doesn't address this transition)
             locs = view(ion_idxs, ((ti-1)*ion_reps+1):(ti*ion_reps))
             for j in 1:prod(mode_dims)
                 for i in nzrange(ld_array, j)
@@ -257,10 +257,10 @@ function _setup_base_hamiltonian(
                     rev_indxs = false
                     idxs = _inv_get_kron_indxs((rows[i], j), mode_dims)
                     for l in 1:L
-                        (idxs[1][l] ≠ idxs[2][l] && typeof(ηnm[l]) <: Number) && @goto cl
+                        (idxs[1][l] ≠ idxs[2][l] && ηnm[l](0.0) == 0.0) && @goto cl
                     end
-                    s_ri = []
-                    s_cri = []
+                    s_ri = Tuple{Int64, Int64}[]
+                    s_cri = Tuple{Int64, Int64}[]
                     for loc in locs
                         if !pflag
                             push!(
@@ -412,7 +412,7 @@ function _setup_δν_hamiltonian(chamber, timescale)
     N = length(ions(chamber))
     allmodes = modes(chamber)
     δν_indices = Vector{Vector{Vector{Int64}}}(undef, 0)
-    δν_functions = FunctionWrapper[]
+    δν_functions = FunctionWrapper{Float64, Tuple{Float64}}[]
     τ = timescale
     for l in eachindex(allmodes)
         δν = frequency_fluctuation(allmodes[l])
@@ -497,13 +497,13 @@ function _ηmatrix(T)
     vms = modes(T)
     all_lasers = lasers(T)
     (N, M, L) = map(x -> length(x), [all_ions, all_lasers, vms])
-    ηnml = Array{Any}(undef, N, M, L)
+    ηnml = Array{FunctionWrapper{Float64, Tuple{Float64}}}(undef, N, M, L)
     for n in 1:N, m in 1:M, l in 1:L
         δν = frequency_fluctuation(vms[l])
         ν = frequency(vms[l])
         eta = lambdicke(vms[l], all_ions[n], all_lasers[m], scaled=true)
         if eta == 0
-            ηnml[n, m, L-l+1] = 0
+            ηnml[n, m, L-l+1] = FunctionWrapper{Float64, Tuple{Float64}}(t -> 0.0)
         else
             ηnml[n, m, L-l+1] =
                 FunctionWrapper{Float64, Tuple{Float64}}(t -> eta / √(ν + δν(t)))
@@ -522,7 +522,7 @@ function _Δmatrix(chamber, timescale)
     (N, M) = length(all_ions), length(all_lasers)
     B = bfield(chamber)
     ∇B = bgradient(chamber)
-    Δnmkj = Array{Vector}(undef, N, M)
+    Δnmkj = Array{Vector{Float64}}(undef, N, M)
     for n in 1:N, m in 1:M
         Btot = bfield(chamber, all_ions[n])
         v = Vector{Float64}(undef, 0)
@@ -547,19 +547,22 @@ function _Ωmatrix(chamber, timescale)
     all_ions = ions(chamber)
     all_lasers = lasers(chamber)
     (N, M) = length(all_ions), length(all_lasers)
-    Ωnmkj = Array{Vector}(undef, N, M)
+    Ωnmkj = Array{Vector{FunctionWrapper{ComplexF64, Tuple{Float64}}}}(undef, N, M)
+    Ω_zero = Array{Vector{Bool}}(undef, N, M)  # true if structurally zero
     for n in 1:N, m in 1:M
         I = intensity(all_lasers[m])
         ϕ = phase(all_lasers[m])
         transitions = subleveltransitions(all_ions[n])
         s_indx = findall(x -> x[1] == n, pointing(all_lasers[m]))
         if length(s_indx) == 0
-            Ωnmkj[n, m] = [0 for _ in 1:length(transitions)]
+            Ωnmkj[n, m] = [FunctionWrapper{ComplexF64, Tuple{Float64}}(t -> complex(0.0)) for _ in 1:length(transitions)]
+            Ω_zero[n, m] = fill(true, length(transitions))
             continue
         else
             s = pointing(all_lasers[m])[s_indx[1]][2]
         end
-        v = []
+        v = FunctionWrapper{ComplexF64, Tuple{Float64}}[]
+        vz = Bool[]
         for t in transitions
             Ω0 =
                 2π *
@@ -574,7 +577,8 @@ function _Ωmatrix(chamber, timescale)
                     bfield_unitvector(chamber)
                 ) / 2.0
             if Ω0 == 0
-                push!(v, 0)
+                push!(v, FunctionWrapper{ComplexF64, Tuple{Float64}}(t -> complex(0.0)))
+                push!(vz, true)
             else
                 push!(
                     v,
@@ -582,11 +586,13 @@ function _Ωmatrix(chamber, timescale)
                         t -> Ω0 * √I(t) * exp(-im * ϕ(t))
                     )
                 )
+                push!(vz, false)
             end
         end
         Ωnmkj[n, m] = v
+        Ω_zero[n, m] = vz
     end
-    return Ωnmkj
+    return Ωnmkj, Ω_zero
 end
 
 # Returns a tuple correpsonding to: [σ₊(t)]_ij ⋅ [D(ξ(t))]_ij, [σ₊(t)]_ji ⋅ [D(ξ(t))]_ji.
@@ -685,12 +691,12 @@ function _check_lamb_dicke_order(lamb_dicke_order, L)
             "if typeof(lamb_dicke_order)<:Vector, then length of lamb_dicke_order must ",
             "equal number of modes"
         )
-        reverse(lamb_dicke_order)
+        return reverse(lamb_dicke_order)
     end
 end
 
 function _ld_array(mode_dims, lamb_dicke_order, νlist, timescale)
-    a = [spzeros(Float16, d, d) for d in mode_dims]
+    a = [spzeros(Float64, d, d) for d in mode_dims]
     @inbounds for (i, d) in enumerate(mode_dims)
         for k in 1:d, l in 1:k
             if k - l <= lamb_dicke_order[i]

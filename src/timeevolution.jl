@@ -1,68 +1,82 @@
 module timeevolution
 
-using QuantumToolbox: QuantumObject, Ket, Operator
+using QuantumToolbox: QuantumObject, Ket, Operator, sesolve, _gen_dimensions
+using QuantumToolbox: TimeEvolutionProblem
 using OrdinaryDiffEqVerner: Vern7
-using SciMLBase: ODEProblem, solve
+using SciMLBase: ODEProblem
+using LinearAlgebra: mul!, lmul!
 
 """
-    schroedinger_dynamic(tspan, psi0, f; kwargs...)
-Integrates the Schrodinger equation where the Hamiltonian `f(t, psi)` is a function of time.
-Returns `(tout, states)` where `states` is a vector of QuantumObject{Ket}.
+    schroedinger_dynamic(tspan, psi0, h; alg=Vern7(), abstol=1e-8, reltol=1e-6, kwargs...)
 
-This provides backward compatibility with the QuantumOptics.jl API.
+Integrate the time-dependent Schrodinger equation using QuantumToolbox's `sesolve`.
+
+`h(t, _)` is a function returning a `QuantumObject{Operator}` whose `.data` is
+updated in-place (the standard IonSim Hamiltonian convention).
+
+Returns a `QuantumToolbox.TimeEvolutionSol` with fields `.times`, `.states`, `.expect`, etc.
 """
 function schroedinger_dynamic(
     tspan,
     psi0::QuantumObject{Ket},
-    f::Function;
-    fout::Union{Function, Nothing}=nothing,
+    h::Function;
+    alg=Vern7(),
+    abstol=1e-8,
+    reltol=1e-6,
     kwargs...
 )
+    H = h(0.0, nothing)
     u0 = copy(psi0.data)
     tlist = collect(Float64, tspan)
 
-    function ode_func!(du, u, p, t)
-        H = f(t, nothing)
-        du .= -1im .* (H.data * u)
+    function ode!(du, u, p, t)
+        h(t, nothing)
+        mul!(du, H.data, u)
+        lmul!(-1im, du)
     end
 
-    prob = ODEProblem(ode_func!, u0, (tlist[1], tlist[end]))
-    sol = solve(prob, Vern7(); saveat=tlist, abstol=1e-8, reltol=1e-6, kwargs...)
+    prob = ODEProblem(ode!, u0, (tlist[1], tlist[end]);
+        abstol=abstol, reltol=reltol,
+        save_everystep=false, save_end=true, saveat=tlist)
 
-    states = Vector{typeof(psi0)}(undef, length(sol.t))
-    for i in eachindex(sol.t)
-        ψ = deepcopy(psi0)
-        ψ.data .= sol[i]
-        states[i] = ψ
-    end
-    return sol.t, states
+    dims = _gen_dimensions(Ket(), psi0.dims)
+    tep = TimeEvolutionProblem(prob, tlist, Ket(), dims, nothing)
+    return sesolve(tep, alg; kwargs...)
 end
 
+"""
+    schroedinger_dynamic(tspan, rho0::QuantumObject{Operator}, h; ...)
+
+Density-matrix form: integrates `dρ/dt = -i[H(t), ρ]` via QuantumToolbox's `sesolve`.
+"""
 function schroedinger_dynamic(
     tspan,
     rho0::QuantumObject{Operator},
-    f::Function;
-    fout::Union{Function, Nothing}=nothing,
+    h::Function;
+    alg=Vern7(),
+    abstol=1e-8,
+    reltol=1e-6,
     kwargs...
 )
+    H = h(0.0, nothing)
     u0 = copy(rho0.data)
     tlist = collect(Float64, tspan)
+    Hρ = similar(u0)
 
-    function ode_func!(du, u, p, t)
-        H = f(t, nothing)
-        du .= -1im .* (H.data * u .- u * H.data)
+    function ode!(du, u, p, t)
+        h(t, nothing)
+        mul!(Hρ, H.data, u)
+        mul!(du, u, H.data)
+        @. du = -1im * (Hρ - du)
     end
 
-    prob = ODEProblem(ode_func!, u0, (tlist[1], tlist[end]))
-    sol = solve(prob, Vern7(); saveat=tlist, abstol=1e-8, reltol=1e-6, kwargs...)
+    prob = ODEProblem(ode!, u0, (tlist[1], tlist[end]);
+        abstol=abstol, reltol=reltol,
+        save_everystep=false, save_end=true, saveat=tlist)
 
-    states = Vector{typeof(rho0)}(undef, length(sol.t))
-    for i in eachindex(sol.t)
-        ρ = deepcopy(rho0)
-        ρ.data .= sol[i]
-        states[i] = ρ
-    end
-    return sol.t, states
+    dims = _gen_dimensions(Operator(), rho0.dims)
+    tep = TimeEvolutionProblem(prob, tlist, Operator(), dims, nothing)
+    return sesolve(tep, alg; kwargs...)
 end
 
 end  # module timeevolution
