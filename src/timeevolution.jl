@@ -2,12 +2,12 @@ module timeevolution
 
 using QuantumToolbox: QuantumObject, Ket, Operator, sesolve, _gen_dimensions
 using QuantumToolbox: TimeEvolutionProblem
-using OrdinaryDiffEqVerner: Vern7
+using OrdinaryDiffEqLowOrderRK: DP5
 using SciMLBase: ODEProblem
 using LinearAlgebra: mul!, lmul!
 
 """
-    schroedinger_dynamic(tspan, psi0, h; alg=Vern7(), abstol=1e-8, reltol=1e-6, kwargs...)
+    schroedinger_dynamic(tspan, psi0, h; alg=DP5(), abstol=1e-8, reltol=1e-6, kwargs...)
 
 Integrate the time-dependent Schrodinger equation using QuantumToolbox's `sesolve`.
 
@@ -20,7 +20,7 @@ function schroedinger_dynamic(
     tspan,
     psi0::QuantumObject{Ket},
     h::Function;
-    alg=Vern7(),
+    alg=DP5(),
     abstol=1e-8,
     reltol=1e-6,
     kwargs...
@@ -53,7 +53,7 @@ function schroedinger_dynamic(
     tspan,
     rho0::QuantumObject{Operator},
     h::Function;
-    alg=Vern7(),
+    alg=DP5(),
     abstol=1e-8,
     reltol=1e-6,
     kwargs...
