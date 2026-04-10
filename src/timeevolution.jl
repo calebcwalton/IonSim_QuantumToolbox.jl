@@ -1,6 +1,6 @@
 module timeevolution
 
-using QuantumToolbox: QuantumObject, Ket, Operator, sesolve, _gen_dimensions
+using QuantumToolbox: QuantumObject, Ket, Operator, sesolve
 using QuantumToolbox: TimeEvolutionProblem
 using OrdinaryDiffEqLowOrderRK: DP5
 using SciMLBase: ODEProblem
@@ -39,7 +39,7 @@ function schroedinger_dynamic(
         abstol=abstol, reltol=reltol,
         save_everystep=false, save_end=true, saveat=tlist)
 
-    dims = _gen_dimensions(Ket(), psi0.dims)
+    dims = psi0.dimensions
     tep = TimeEvolutionProblem(prob, tlist, Ket(), dims, nothing)
     return sesolve(tep, alg; kwargs...)
 end
@@ -74,7 +74,7 @@ function schroedinger_dynamic(
         abstol=abstol, reltol=reltol,
         save_everystep=false, save_end=true, saveat=tlist)
 
-    dims = _gen_dimensions(Operator(), rho0.dims)
+    dims = rho0.dimensions
     tep = TimeEvolutionProblem(prob, tlist, Operator(), dims, nothing)
     return sesolve(tep, alg; kwargs...)
 end

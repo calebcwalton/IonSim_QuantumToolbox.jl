@@ -24,19 +24,19 @@ Base.one(ion::Ion) = qeye(hilbert_dim(ion))
     create(v::VibrationalMode)
 returns the creation operator for `v` such that: `create(v) * v[i] = √(i+1) * v[i+1]`.
 """
-create(v::VibrationalMode) = QuantumObject(sparse(diagm(-1 => complex.(sqrt.(1:(modecutoff(v)))))))
+create(v::VibrationalMode) = QuantumToolbox.create(hilbert_dim(v))
 
 """
     destroy(v::VibrationalMode)
 Returns the destruction operator for `v` such that: `destroy(v) * v[i] = √i * v[i-1]`.
 """
-destroy(v::VibrationalMode) = create(v)'
+destroy(v::VibrationalMode) = QuantumToolbox.destroy(hilbert_dim(v))
 
 """
     number(v::VibrationalMode)
 Returns the number operator for `v` such that:  `number(v) * v[i] = i * v[i]`.
 """
-number(v::VibrationalMode) = QuantumObject(sparse(diagm(0 => complex.(Float64.(0:(modecutoff(v)))))))
+number(v::VibrationalMode) = QuantumToolbox.num(hilbert_dim(v))
 
 """
     displace(v::VibrationalMode, α::Number; method="truncated")
@@ -66,7 +66,7 @@ function displace(v::VibrationalMode, α::Number; method="truncated")
         end
         return QuantumObject(D)
     elseif method ≡ "truncated"
-        return exp(α * create(v) - conj(α) * destroy(v))
+        return QuantumToolbox.displace(hilbert_dim(v), α)
     end
 end
 
@@ -87,8 +87,7 @@ function thermalstate(v::VibrationalMode, n̄::Real; method="truncated")
     if n̄ == 0
         return v[0] * dag(v[0])
     elseif method ≡ "truncated"
-        d = [(n̄ / (n̄ + 1))^i for i in 0:(modecutoff(v))]
-        return QuantumObject(diagm(0 => complex.(d ./ sum(d))))
+        return QuantumToolbox.thermal_dm(hilbert_dim(v), n̄)
     elseif method ≡ "analytic"
         return QuantumObject(
             diagm(0 => complex.([(n̄ / (n̄ + 1))^i / (n̄ + 1) for i in 0:(modecutoff(v))]))

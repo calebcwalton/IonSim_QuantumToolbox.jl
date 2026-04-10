@@ -83,7 +83,7 @@ Embed local operators into the full composite Hilbert space.
 Uses reversed kron ordering to match the Hamiltonian index convention.
 """
 function _embed(b::IonSimCompositeBasis, positions::Vector{Int}, ops)
-    factors = Any[qeye(d) for d in b.dims]
+    factors = [qeye(d) for d in b.dims]
     for (pos, op) in zip(positions, ops)
         factors[pos] = op
     end

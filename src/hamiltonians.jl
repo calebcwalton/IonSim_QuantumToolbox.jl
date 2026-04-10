@@ -92,47 +92,63 @@ function hamiltonian(
     )
     aui, gbi, gbs, bfunc, δνi, δνfuncs = _setup_fluctuation_hamiltonian(chamber, timescale)
     S = _zero_op(basis(chamber))
+
+    # Seed the sparsity pattern with all off-diagonal positions, then precompute
+    # nzval indices for O(1) access in the hot loop (replacing O(log n) CSC lookups).
+    _seed_sparsity!(S.data, indxs, cindxs)
+    Sd = S.data
+    nzval = Sd.nzval
+
+    # Precompute nzval positions for base Hamiltonian terms
+    nz_fwd = [Int[_nzval_idx(Sd, i1, i2) for (i1, i2) in indxs[i]] for i in 1:length(indxs)]
+    nz_herm = [Int[_nzval_idx(Sd, i2, i1) for (i1, i2) in indxs[i]] for i in 1:length(indxs)]
+    nz_cfwd = [Int[_nzval_idx(Sd, cindxs[i][k]...) for k in 2:length(cindxs[i])] for i in 1:length(cindxs)]
+    nz_cherm = [Int[_nzval_idx(Sd, cindxs[i][k][2], cindxs[i][k][1]) for k in 2:length(cindxs[i])] for i in 1:length(cindxs)]
+
+    # Precompute nzval positions for diagonal fluctuation terms
+    nz_aui = Int[_nzval_idx(Sd, indx, indx) for indx in aui]
+    nz_gbi = [Int[_nzval_idx(Sd, indx, indx) for indx in gbi[i]] for i in 1:length(gbi)]
+    nz_δνi = [[Int[_nzval_idx(Sd, indx, indx) for indx in δνi[i][n]] for n in 1:length(δνi[i])] for i in 1:length(δνi)]
+
     function f(t, ψ)  # a two argument function is required by the time evolution solvers
         @inbounds begin
             @simd for i in 1:length(indxs)
                 bt_i, conj_bt_i = b[i](t)::Tuple{ComplexF64, ComplexF64}
-                @simd for j in 1:length(indxs[i])
+                @simd for j in 1:length(nz_fwd[i])
+                    nzval[nz_fwd[i][j]] = bt_i
                     i1, i2 = indxs[i][j]
-                    S.data[i1, i2] = bt_i
                     if i1 != i2
-                        S.data[i2, i1] = conj(bt_i)
-                        if length(cindxs[i]) != 0
+                        nzval[nz_herm[i][j]] = conj(bt_i)
+                        if length(nz_cfwd[i]) != 0
                             flag = cindxs[i][1][1]
-                            i3, i4 = cindxs[i][j+1]
                             if flag == -1
-                                S.data[i3, i4] = -conj_bt_i
-                                S.data[i4, i3] = -conj(conj_bt_i)
+                                nzval[nz_cfwd[i][j]] = -conj_bt_i
+                                nzval[nz_cherm[i][j]] = -conj(conj_bt_i)
                             else
-                                S.data[i3, i4] = conj_bt_i
-                                S.data[i4, i3] = conj(conj_bt_i)
+                                nzval[nz_cfwd[i][j]] = conj_bt_i
+                                nzval[nz_cherm[i][j]] = conj(conj_bt_i)
                             end
                         end
                     end
                 end
             end
-            if length(gbi) == 0 && length(δνi) == 0
+            if length(nz_gbi) == 0 && length(nz_δνi) == 0
                 return S
             else
-                @simd for indx in aui
-                    S.data[indx, indx] = complex(0.0)
+                @simd for k in 1:length(nz_aui)
+                    nzval[nz_aui[k]] = complex(0.0)
                 end
-                @simd for i in 1:length(gbi)
+                @simd for i in 1:length(nz_gbi)
                     zeeman_t = bfunc(t)::Float64
-                    @simd for j in 1:length(gbi[i])
-                        indx = gbi[i][j]
-                        S.data[indx, indx] += zeeman_t * gbs[i][j]
+                    @simd for j in 1:length(nz_gbi[i])
+                        nzval[nz_gbi[i][j]] += zeeman_t * gbs[i][j]
                     end
                 end
-                @simd for i in 1:length(δνi)
+                @simd for i in 1:length(nz_δνi)
                     δν_t = δνfuncs[i](t)::Float64
-                    @simd for n in 1:length(δνi[i])
-                        @simd for indx in δνi[i][n]
-                            S.data[indx, indx] += n * δν_t
+                    @simd for n in 1:length(nz_δνi[i])
+                        @simd for k in 1:length(nz_δνi[i][n])
+                            nzval[nz_δνi[i][n][k]] += n * δν_t
                         end
                     end
                 end
@@ -411,6 +427,7 @@ end
 function _setup_δν_hamiltonian(chamber, timescale)
     N = length(ions(chamber))
     allmodes = modes(chamber)
+    dims = basis(chamber).dims
     δν_indices = Vector{Vector{Vector{Int64}}}(undef, 0)
     δν_functions = FunctionWrapper{Float64, Tuple{Float64}}[]
     τ = timescale
@@ -423,12 +440,9 @@ function _setup_δν_hamiltonian(chamber, timescale)
             FunctionWrapper{Float64, Tuple{Float64}}(t -> @fastmath 2π * δν(t) * τ)
         )
         δν_indices_l = Vector{Vector{Int64}}(undef, 0)
-        mode_op = number(mode)
-        A = _embed(basis(chamber), [N + l], [mode_op]).data
         mode_dim = mode.shape[1]
         for i in 1:(mode_dim-1)
-            indices = [x[1] for x in getfield.(findall(x -> x .== complex(i, 0), A), :I)]
-            push!(δν_indices_l, indices)
+            push!(δν_indices_l, _diagonal_indices_for_value(dims, N + l, i))
         end
         push!(δν_indices, δν_indices_l)
     end
@@ -445,6 +459,7 @@ end
 # updated at each time step by by bfunc(t) times the individual susceptibilities.
 function _setup_global_B_hamiltonian(chamber, timescale)
     all_ions = ions(chamber)
+    dims = basis(chamber).dims
     global_B_indices = Vector{Vector{Int64}}(undef, 0)
     global_B_scales = Vector{Float64}(undef, 0)
     δB = bfield_fluctuation(chamber)
@@ -454,13 +469,8 @@ function _setup_global_B_hamiltonian(chamber, timescale)
         return global_B_indices, global_B_scales, bfunc
     end
     for n in eachindex(all_ions)
-        for sublevel in sublevels(all_ions[n])
-            ion_op = sigma(all_ions[n], sublevel)
-            A = _embed(basis(chamber), [n], [ion_op]).data
-            indices = [x[1] for x in getfield.(findall(x -> x .== complex(1, 0), A), :I)]
-            push!(global_B_indices, indices)
-            # zeemanshift(ions[n], sublevel, 1]) is the Zeeman shift of
-            # sublevel in units of δB.
+        for (k, sublevel) in enumerate(sublevels(all_ions[n]))
+            push!(global_B_indices, _diagonal_indices_for_value(dims, n, k - 1))
             push!(global_B_scales, τ * zeemanshift(all_ions[n], sublevel, 1))
         end
     end
@@ -482,12 +492,69 @@ end
 # internal functions
 #############################################################################################
 
-# https://gist.github.com/ivirshup/e9148f01663278ca4972d8a2d9715f72
-function _flattenall(a::AbstractArray)
-    while any(x -> typeof(x) <: AbstractArray, a)
-        a = collect(Iterators.flatten(a))
+# Compute all composite-space diagonal indices where subsystem `position` has local
+# (0-based) index `local_idx`. Uses IonSim's reversed-kron convention where the first
+# dimension in `dims` varies fastest.
+function _diagonal_indices_for_value(dims, position, local_idx)
+    inner_dim = prod(dims[1:position-1]; init=1)
+    outer_dim = prod(dims[position+1:end]; init=1)
+    block_size = inner_dim * dims[position]
+    count = inner_dim * outer_dim
+    indices = Vector{Int64}(undef, count)
+    idx = 0
+    base = local_idx * inner_dim
+    for o in 0:(outer_dim - 1)
+        start = o * block_size + base
+        for i in 0:(inner_dim - 1)
+            idx += 1
+            indices[idx] = start + i + 1
+        end
     end
-    return a
+    return indices
+end
+
+function _flattenall(a::AbstractArray)
+    result = Int64[]
+    _flattenall_impl!(result, a)
+    return result
+end
+
+function _flattenall_impl!(result, a::AbstractArray)
+    for x in a
+        if x isa AbstractArray
+            _flattenall_impl!(result, x)
+        else
+            push!(result, x)
+        end
+    end
+end
+
+# Find the nzval index for entry (row, col) in a CSC sparse matrix.
+# Assumes the entry exists in the sparsity pattern.
+function _nzval_idx(Sp, row, col)
+    @inbounds for idx in Sp.colptr[col]:(Sp.colptr[col+1]-1)
+        Sp.rowval[idx] == row && return idx
+    end
+    error("Sparse entry ($row, $col) not in sparsity pattern")
+end
+
+# Seed the sparsity pattern of a CSC sparse matrix with structural entries at all
+# positions that the Hamiltonian hot loop will write to. Uses one() instead of
+# zero() because SparseMatrixCSC skips insertion when the value is exactly zero.
+# The seeded values are overwritten on the first call to f(t, ψ).
+function _seed_sparsity!(Sp, indxs, cindxs)
+    placeholder = one(ComplexF64)
+    for i in 1:length(indxs)
+        for (i1, i2) in indxs[i]
+            Sp[i1, i2] = placeholder
+            i1 != i2 && (Sp[i2, i1] = placeholder)
+        end
+        for k in 2:length(cindxs[i])
+            i3, i4 = cindxs[i][k]
+            Sp[i3, i4] = placeholder
+            Sp[i4, i3] = placeholder
+        end
+    end
 end
 
 # A 3D array of Lamb-Dicke parameters for each combination of ion, laser and mode. Modes are
@@ -643,24 +710,11 @@ function _inv_get_kron_indxs(indxs, dims)
     ret_rows = Array{Int64}(undef, N)
     ret_cols = Array{Int64}(undef, N)
     for i in 1:N
-        tensor_N = prod(dims[i:N])
-        M = tensor_N ÷ dims[i]
-        rowflag = false
-        colflag = false
-        for j in 1:dims[i]
-            jM = j * M
-            if !rowflag && row <= jM
-                @inbounds ret_rows[i] = j
-                row -= jM - M
-                rowflag = true
-            end
-            if !colflag && col <= jM
-                @inbounds ret_cols[i] = j
-                col -= jM - M
-                colflag = true
-            end
-            rowflag && colflag && break
-        end
+        M = i < N ? prod(dims[(i+1):N]) : 1
+        @inbounds ret_rows[i] = (row - 1) ÷ M + 1
+        row -= (ret_rows[i] - 1) * M
+        @inbounds ret_cols[i] = (col - 1) ÷ M + 1
+        col -= (ret_cols[i] - 1) * M
     end
     return Tuple(ret_rows), Tuple(ret_cols)
 end
@@ -683,8 +737,8 @@ end
 # L (i.e. same lamb_dicke_order for all modes). Otherwise lamb_dicke_order is reversed and
 # returned.
 function _check_lamb_dicke_order(lamb_dicke_order, L)
-    if typeof(lamb_dicke_order) <: Int
-        return [lamb_dicke_order for _ in 1:L]
+    if lamb_dicke_order isa Int
+        return fill(lamb_dicke_order, L)
     else
         @assert(
             length(lamb_dicke_order) == L,
